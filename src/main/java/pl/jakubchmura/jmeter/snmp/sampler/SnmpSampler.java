@@ -25,8 +25,9 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class SnmpSampler extends AbstractSampler implements ThreadListener {
 
@@ -66,18 +67,22 @@ public class SnmpSampler extends AbstractSampler implements ThreadListener {
 
             if (communicationStyle == CommunicationStyle.RequestOnly) {
                 snmp.notify(pdu, target);
+                res.setSentBytes(pdu.getBERLength());
                 res.setResponseOK();
             } else {
                 String value = getCorrelationValue(pdu);
-                CountDownLatch latch = new CountDownLatch(1);
-                snmpReceiver.addLatch(value, latch);
+                CompletableFuture<PDU> future = new CompletableFuture<>();
+                snmpReceiver.addFuture(value, future);
                 snmp.notify(pdu, target);
-                boolean await = latch.await(getPropertyAsLong(TIMEOUT), TimeUnit.MILLISECONDS);
-                if (await) {
+                res.setSentBytes(pdu.getBERLength());
+                try {
+                    PDU response = future.get(getPropertyAsLong(TIMEOUT), TimeUnit.MILLISECONDS);
                     log.debug("Received matching return trap");
                     res.setResponseOK();
-                } else {
-                    log.warn("Timeout occurred while waiting for incoming trap with value " + value);
+                    res.setBytes((long) response.getBERLength());
+                } catch (TimeoutException e1) {
+                    log.warn("Timeout occurred while waiting for incoming trap with value " + value, e1);
+                    res.setResponseMessage("Timeout occurred while waiting for incoming trap");
                 }
             }
         } catch (Exception ex) {

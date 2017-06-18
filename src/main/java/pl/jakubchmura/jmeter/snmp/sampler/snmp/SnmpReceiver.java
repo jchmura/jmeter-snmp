@@ -15,7 +15,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 
 public class SnmpReceiver implements CommandResponder {
 
@@ -24,7 +24,7 @@ public class SnmpReceiver implements CommandResponder {
 
     private static final Logger log = LoggerFactory.getLogger(SnmpReceiver.class);
 
-    private final Map<String, CountDownLatch> latches = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, CompletableFuture<PDU>> futures = Collections.synchronizedMap(new HashMap<>());
     private final Snmp snmp;
     private final OID correlationOid;
 
@@ -54,16 +54,16 @@ public class SnmpReceiver implements CommandResponder {
         log.debug("Received event: " + event);
         PDU pdu = event.getPDU();
         String value = getCorrelationValue(pdu);
-        CountDownLatch countDownLatch = latches.remove(value);
-        if (countDownLatch == null) {
+        CompletableFuture<PDU> future = futures.remove(value);
+        if (future == null) {
             log.warn("Received a trap for which there is no waiting sample");
         } else {
-            countDownLatch.countDown();
+            future.complete(pdu);
         }
     }
 
-    public synchronized void addLatch(String value, CountDownLatch latch) {
-        latches.put(value, latch);
+    public synchronized void addFuture(String value, CompletableFuture<PDU> future) {
+        futures.put(value, future);
     }
 
     private String getCorrelationValue(PDU pdu) {
